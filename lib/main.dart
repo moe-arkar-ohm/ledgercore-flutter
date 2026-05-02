@@ -1,6 +1,7 @@
 import 'dart:convert';
 import 'package:flutter/material.dart';
 import 'package:http/http.dart' as http;
+import 'package:web_socket_channel/web_socket_channel.dart'; // NEW IMPORT
 
 void main() {
   runApp(const LedgerCoreApp());
@@ -31,103 +32,83 @@ class _DashboardScreenState extends State<DashboardScreen> {
   String balance = "Loading...";
   bool isLoading = false;
 
-  // The asynchronous network call to our Go Engine
-  Future<void> fetchBalance() async {
-    setState(() {
-      isLoading = true; // Tell the UI to show a spinner
-    });
+  // 1. Declare the persistent WebSocket channel
+  late WebSocketChannel channel;
 
+  @override
+  void initState() {
+    super.initState();
+    fetchBalance(); // Fetch initial state via REST
+
+    // 2. Dial the WebSocket phone number on boot
+    // The Architect: Notice we use 'ws://' instead of 'http://'
+    channel = WebSocketChannel.connect(Uri.parse('ws://localhost:8080/ws'));
+
+    // 3. Keep the ear to the phone forever
+    channel.stream.listen((message) {
+      if (message == "REFRESH_BALANCE") {
+        print("WebSocket ping received! Updating UI silently...");
+        fetchBalance();
+      }
+    });
+  }
+
+  // 4. The SRE: Always hang up the phone when the user closes the app
+  @override
+  void dispose() {
+    channel.sink.close();
+    super.dispose();
+  }
+
+  Future<void> fetchBalance() async {
+    // We removed isLoading = true here so the UI doesn't flash a spinner
+    // when a background WebSocket update happens. It feels like magic.
     try {
-      // The Architect: We use localhost because we are running natively on Windows.
-      // If we were on an Android emulator, this would need to be 10.0.2.2.
       final response = await http.get(
         Uri.parse('http://localhost:8080/balance'),
       );
-
       if (response.statusCode == 200) {
-        // Decode the JSON from Go
         final data = jsonDecode(response.body);
         setState(() {
-          // Format the double to 2 decimal places
           balance = "\$${(data['balance'] as double).toStringAsFixed(2)}";
-        });
-      } else {
-        setState(() {
-          balance = "Error: ${response.statusCode}";
         });
       }
     } catch (e) {
-      // The SRE: Never let the app crash if the Go server is offline.
-      setState(() {
-        balance = "Server Offline";
-      });
       print("Network Error: $e");
-    } finally {
-      setState(() {
-        isLoading = false; // Turn off the spinner
-      });
     }
   }
 
-  // The asynchronous POST request to trigger the ACID transaction
   Future<void> executeTransfer() async {
     setState(() {
-      isLoading = true; // Block the UI while the transaction processes
+      isLoading = true;
     });
 
     try {
       final response = await http.post(
         Uri.parse('http://localhost:8080/transfer'),
-        headers: {
-          'Content-Type':
-              'application/json', // We MUST tell Go we are sending JSON
-        },
+        headers: {'Content-Type': 'application/json'},
         body: jsonEncode({
           "sender_id": "a1111111-1111-1111-1111-111111111111",
           "receiver_id": "b2222222-2222-2222-2222-222222222222",
-          "amount": 10.00, // Transfer $10
+          "amount": 10.00,
         }),
       );
 
       if (response.statusCode == 201) {
-        // 201 Created is our success code from Go
-        // Transaction successful!
         ScaffoldMessenger.of(context).showSnackBar(
           const SnackBar(
-            content: Text("Transfer Securely Completed!"),
+            content: Text("Transfer Secure!"),
             backgroundColor: Colors.green,
           ),
         );
-        // Automatically refresh the balance to show the new total
-        await fetchBalance();
-      } else {
-        // Handle logic errors (like Insufficient Funds - 400)
-        ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(
-            content: Text("Failed: ${response.body}"),
-            backgroundColor: Colors.red,
-          ),
-        );
+        // 5. Fire the event down the WebSocket instead of awaiting fetchBalance() here
+        channel.sink.add("REFRESH_BALANCE");
       }
-    } catch (e) {
-      ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(
-          content: Text("Network Error. Check Go Engine."),
-          backgroundColor: Colors.red,
-        ),
-      );
     } finally {
       setState(() {
         isLoading = false;
       });
     }
-  }
-
-  // This runs exactly once when the screen first loads
-  @override
-  void initState() {
-    super.initState();
-    fetchBalance(); // Fetch immediately on boot
   }
 
   @override
