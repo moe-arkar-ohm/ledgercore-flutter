@@ -70,7 +70,10 @@ class _DashboardScreenState extends State<DashboardScreen> {
       if (response.statusCode == 200) {
         final data = jsonDecode(response.body);
         setState(() {
-          balance = "\$${(data['balance'] as double).toStringAsFixed(2)}";
+          // balance = "\$${(data['balance'] as double).toStringAsFixed(2)}";
+          // 'num' can be either int or double. We let Dart figure it out, then convert it.
+          balance =
+              "\$${(data['balance'] as num).toDouble().toStringAsFixed(2)}";
         });
       }
     } catch (e) {
