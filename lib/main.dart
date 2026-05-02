@@ -69,6 +69,60 @@ class _DashboardScreenState extends State<DashboardScreen> {
     }
   }
 
+  // The asynchronous POST request to trigger the ACID transaction
+  Future<void> executeTransfer() async {
+    setState(() {
+      isLoading = true; // Block the UI while the transaction processes
+    });
+
+    try {
+      final response = await http.post(
+        Uri.parse('http://localhost:8080/transfer'),
+        headers: {
+          'Content-Type':
+              'application/json', // We MUST tell Go we are sending JSON
+        },
+        body: jsonEncode({
+          "sender_id": "a1111111-1111-1111-1111-111111111111",
+          "receiver_id": "b2222222-2222-2222-2222-222222222222",
+          "amount": 10.00, // Transfer $10
+        }),
+      );
+
+      if (response.statusCode == 201) {
+        // 201 Created is our success code from Go
+        // Transaction successful!
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(
+            content: Text("Transfer Securely Completed!"),
+            backgroundColor: Colors.green,
+          ),
+        );
+        // Automatically refresh the balance to show the new total
+        await fetchBalance();
+      } else {
+        // Handle logic errors (like Insufficient Funds - 400)
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(
+            content: Text("Failed: ${response.body}"),
+            backgroundColor: Colors.red,
+          ),
+        );
+      }
+    } catch (e) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(
+          content: Text("Network Error. Check Go Engine."),
+          backgroundColor: Colors.red,
+        ),
+      );
+    } finally {
+      setState(() {
+        isLoading = false;
+      });
+    }
+  }
+
   // This runs exactly once when the screen first loads
   @override
   void initState() {
@@ -104,6 +158,14 @@ class _DashboardScreenState extends State<DashboardScreen> {
               onPressed: isLoading ? null : fetchBalance,
               icon: const Icon(Icons.refresh),
               label: const Text("Sync with Database"),
+            ),
+            const SizedBox(height: 20),
+            ElevatedButton.icon(
+              // If we are currently loading, disable the button so the user can't double-click
+              onPressed: isLoading ? null : executeTransfer,
+              icon: const Icon(Icons.send),
+              style: ElevatedButton.styleFrom(backgroundColor: Colors.purple),
+              label: const Text("Send \$10 to User B"),
             ),
           ],
         ),
